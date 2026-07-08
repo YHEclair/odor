@@ -538,6 +538,8 @@ def main():
     featurizer = MoleculeFeaturizer()
     sample_smiles = train_df.iloc[0][cfg.smiles_col]
     sample_mol = Chem.MolFromSmiles(sample_smiles)
+    if sample_mol is None:
+        raise ValueError(f"Invalid first training SMILES: {sample_smiles}")
     sample_x, _, sample_edge_attr = featurizer(sample_mol)
     cfg.gnn_input_dim = sample_x.shape[1]
 
@@ -582,6 +584,76 @@ def main():
     logger.info(f"Optimizer: Adam(lr={cfg.lr}, weight_decay={cfg.weight_decay})")
     logger.info("Architecture: GATv2 graph branch + independent binary heads")
 
+    best_valid_auc = -np.inf
+    best_epoch = -1
+    wait = 0
+
+    for epoch in range(1, cfg.epochs + 1):
+        logger.info(f"========== Epoch {epoch}/{cfg.epochs} ==========")
+
+        train_loss = train_one_epoch(
+            model=model,
+            loader=train_loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            device=cfg.device,
+            epoch=epoch,
+            total_epochs=cfg.epochs
+        )
+
+        valid_loss, valid_summary, _ = evaluate(
+            model=model,
+            loader=valid_loader,
+            criterion=criterion,
+            device=cfg.device,
+            threshold=cfg.threshold,
+            desc=f"Valid Epoch {epoch}/{cfg.epochs}"
+        )
+
+        logger.info(
+            f"[Epoch {epoch:03d}] "
+            f"TrainLoss={train_loss:.6f} | "
+            f"ValidLoss={valid_loss:.6f} | "
+            f"ACC={valid_summary['acc_macro']:.4f} | "
+            f"F1={valid_summary['f1_macro']:.4f} | "
+            f"MCC={valid_summary['mcc_macro']:.4f} | "
+            f"CK={valid_summary['ck_macro']:.4f} | "
+            f"AUC={valid_summary['auc_macro']:.4f} | "
+            f"Sn={valid_summary['sn_macro']:.4f} | "
+            f"Sp={valid_summary['sp_macro']:.4f} | "
+            f"ExactAcc={valid_summary['exact_match_acc']:.4f}"
+        )
+
+        current_valid_auc = valid_summary["auc_macro"]
+
+        if current_valid_auc > best_valid_auc:
+            best_valid_auc = current_valid_auc
+            best_epoch = epoch
+            wait = 0
+
+            torch.save(
+                {
+                    "epoch": int(epoch),
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "best_valid_auc": float(best_valid_auc),
+                    "label_cols": list(label_cols),
+                    "gnn_input_dim": int(cfg.gnn_input_dim),
+                    "gnn_output_dim": int(cfg.gnn_output_dim),
+                },
+                os.path.join(cfg.save_dir, cfg.model_name)
+            )
+            logger.info(f"New best model saved at epoch {epoch}, valid AUC={best_valid_auc:.4f}")
+        else:
+            wait += 1
+            if wait >= cfg.patience:
+                logger.info(f"Early stopping at epoch {epoch}")
+                break
+
+    if best_epoch < 0:
+        raise RuntimeError("No valid checkpoint was saved during training.")
+
+    logger.info(f"Best epoch: {best_epoch}, Best valid AUC: {best_valid_auc:.4f}")
 
     ckpt = torch.load(
         os.path.join(cfg.save_dir, cfg.model_name),
@@ -590,7 +662,6 @@ def main():
     )
     model.load_state_dict(ckpt["model_state_dict"])
     logger.info(f"Loaded best model from: {os.path.join(cfg.save_dir, cfg.model_name)}")
-    logger.info(f"Checkpoint best_valid_auc: {ckpt.get('best_valid_auc', 'N/A')}")
 
 
     test_loss, test_summary, test_per_label = evaluate(
