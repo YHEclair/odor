@@ -14,7 +14,8 @@ python prepare_openpom_labels.py
 python split_dataset.py
 python train_descriptor_xgb.py
 python train_fingerprint_xgb.py
-python train_gnn_gatv2.py
+python gnn.py
+python gnnnpy.py
 python ensemble_simple_average.py
 python optimize_label_thresholds.py
 python compare_model_ensembles.py
@@ -22,3 +23,5 @@ python compare_model_ensembles.py
 
 Generated outputs are written to `results/`, which is intentionally excluded from the release files.
 Processed data and split files are also generated locally and are intentionally excluded from version control.
+
+`gnn.py` is the full GNN training script. `gnnnpy.py` is kept as the companion GNN prediction/export script from the original workflow.
