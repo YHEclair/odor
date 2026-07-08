@@ -29,9 +29,6 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, global_mean_pool, global_max_pool
 
 
-# =========================================================
-# 1. 日志与随机种子
-# =========================================================
 def get_logger(filename):
     logger = logging.getLogger(filename)
     logger.setLevel(logging.INFO)
@@ -42,9 +39,6 @@ def get_logger(filename):
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-        file_handler = logging.FileHandler(filename, encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
 
     return logger
 
@@ -62,17 +56,14 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
 
 
-# =========================================================
-# 2. 配置
-# =========================================================
 class Config:
     seed = 2026
 
-    train_csv = "./split/train.csv"
-    valid_csv = "./split/valid.csv"
-    test_csv = "./split/test.csv"
+    train_csv = "data/split/train.csv"
+    valid_csv = "data/split/valid.csv"
+    test_csv = "data/split/test.csv"
 
-    save_dir = "./gnn_output"
+    save_dir = "results/gnn_output"
     model_name = "gatv2_shared_backbone_independent_heads.pt"
 
     smiles_col = "SMILES"
@@ -95,9 +86,6 @@ class Config:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# =========================================================
-# 3. 工具函数
-# =========================================================
 def one_hot_encoding(value, choices):
     encoding = [0] * len(choices)
     if value in choices:
@@ -105,9 +93,6 @@ def one_hot_encoding(value, choices):
     return encoding
 
 
-# =========================================================
-# 4. 分子图特征
-# =========================================================
 class MoleculeFeaturizer(object):
     def __init__(self, bond_features=True):
         self.bond_features = bond_features
@@ -228,9 +213,6 @@ class MoleculeFeaturizer(object):
         return x, edge_index, edge_attr
 
 
-# =========================================================
-# 5. 数据集
-# =========================================================
 class GraphDataset(Dataset):
     def __init__(self, df, smiles_col, label_cols, featurizer=None):
         self.df = df.reset_index(drop=True)
@@ -252,7 +234,7 @@ class GraphDataset(Dataset):
 
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            raise ValueError(f"无效 SMILES: {smiles}")
+            raise ValueError(f"Invalid SMILES: {smiles}")
 
         x, edge_index, edge_attr = self.featurizer(mol)
 
@@ -266,9 +248,6 @@ class GraphDataset(Dataset):
         return data
 
 
-# =========================================================
-# 6. 模型：共享 backbone + 独立二分类头
-# =========================================================
 class GATv2MultiLabel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -350,9 +329,6 @@ class GATv2MultiLabel(nn.Module):
         return logits
 
 
-# =========================================================
-# 7. 指标计算
-# =========================================================
 def binary_metrics_per_label(y_true, y_prob, threshold=0.5):
     y_pred = (y_prob >= threshold).astype(int)
 
@@ -426,9 +402,6 @@ def binary_metrics_per_label(y_true, y_prob, threshold=0.5):
     return summary, per_label
 
 
-# =========================================================
-# 8. 训练与验证
-# =========================================================
 def train_one_epoch(model, loader, optimizer, criterion, device, epoch=None, total_epochs=None):
     model.train()
     running_loss = 0.0
@@ -539,14 +512,11 @@ def predict_probs(model, loader, device, desc="Predicting"):
     return all_probs, all_true
 
 
-# =========================================================
-# 9. 主程序
-# =========================================================
 def main():
     cfg = Config()
     os.makedirs(cfg.save_dir, exist_ok=True)
 
-    logger = get_logger(os.path.join(cfg.save_dir, "train.log"))
+    logger = get_logger("train")
     seed_everything(cfg.seed)
 
     logger.info(f"Using device: {cfg.device}")
@@ -564,7 +534,7 @@ def main():
     logger.info(f"Num labels: {len(label_cols)}")
     logger.info(f"Label cols: {label_cols}")
 
-    # 自动检测输入维度
+
     featurizer = MoleculeFeaturizer()
     sample_smiles = train_df.iloc[0][cfg.smiles_col]
     sample_mol = Chem.MolFromSmiles(sample_smiles)
@@ -612,7 +582,7 @@ def main():
     logger.info(f"Optimizer: Adam(lr={cfg.lr}, weight_decay={cfg.weight_decay})")
     logger.info("Architecture: GATv2 graph branch + independent binary heads")
 
-    # 直接加载最佳模型，不重训
+
     ckpt = torch.load(
         os.path.join(cfg.save_dir, cfg.model_name),
         map_location=cfg.device,
@@ -622,7 +592,7 @@ def main():
     logger.info(f"Loaded best model from: {os.path.join(cfg.save_dir, cfg.model_name)}")
     logger.info(f"Checkpoint best_valid_auc: {ckpt.get('best_valid_auc', 'N/A')}")
 
-    # 保留原 test 评估
+
     test_loss, test_summary, test_per_label = evaluate(
         model=model,
         loader=test_loader,
@@ -652,9 +622,9 @@ def main():
         index=False,
         encoding="utf-8-sig"
     )
-    logger.info("已保存每标签测试指标: test_per_label_metrics.csv")
+    logger.info("Saved per-label test metrics: test_per_label_metrics.csv")
 
-    # 导出 valid / test 概率，供 stacking 使用
+
     valid_probs, valid_targets = predict_probs(
         model=model,
         loader=valid_loader,
@@ -674,10 +644,10 @@ def main():
     np.save(os.path.join(cfg.save_dir, "gnn_test_probs.npy"), test_probs)
     np.save(os.path.join(cfg.save_dir, "gnn_test_targets.npy"), test_targets)
 
-    logger.info(f"已保存: {os.path.join(cfg.save_dir, 'gnn_valid_probs.npy')}")
-    logger.info(f"已保存: {os.path.join(cfg.save_dir, 'gnn_valid_targets.npy')}")
-    logger.info(f"已保存: {os.path.join(cfg.save_dir, 'gnn_test_probs.npy')}")
-    logger.info(f"已保存: {os.path.join(cfg.save_dir, 'gnn_test_targets.npy')}")
+    logger.info(f"Saved: {os.path.join(cfg.save_dir, 'gnn_valid_probs.npy')}")
+    logger.info(f"Saved: {os.path.join(cfg.save_dir, 'gnn_valid_targets.npy')}")
+    logger.info(f"Saved: {os.path.join(cfg.save_dir, 'gnn_test_probs.npy')}")
+    logger.info(f"Saved: {os.path.join(cfg.save_dir, 'gnn_test_targets.npy')}")
 
     logger.info(f"valid_probs shape: {valid_probs.shape}")
     logger.info(f"test_probs shape : {test_probs.shape}")

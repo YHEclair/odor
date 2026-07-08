@@ -28,9 +28,6 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, global_mean_pool, global_max_pool
 
 
-# =========================================================
-# 1. 日志与随机种子
-# =========================================================
 def get_logger(filename):
     logger = logging.getLogger(filename)
     logger.setLevel(logging.INFO)
@@ -41,9 +38,6 @@ def get_logger(filename):
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-        file_handler = logging.FileHandler(filename, encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
 
     return logger
 
@@ -61,17 +55,14 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
 
 
-# =========================================================
-# 2. 配置
-# =========================================================
 class Config:
     seed = 2026
 
-    train_csv = "./split/train.csv"
-    valid_csv = "./split/valid.csv"
-    test_csv = "./split/test.csv"
+    train_csv = "data/split/train.csv"
+    valid_csv = "data/split/valid.csv"
+    test_csv = "data/split/test.csv"
 
-    save_dir = "./gnn_2output"
+    save_dir = "results/gnn_output"
     model_name = "gatv2_shared_backbone_independent_heads.pt"
 
     smiles_col = "SMILES"
@@ -88,15 +79,12 @@ class Config:
     gnn_hidden_dim = 64
     gnn_head = 4
     gnn_dropout = 0.2
-    gnn_output_dim = 18   # main() 里会自动覆盖
+    gnn_output_dim = 18
 
     threshold = 0.5
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# =========================================================
-# 3. 工具函数
-# =========================================================
 def one_hot_encoding(value, choices):
     encoding = [0] * len(choices)
     if value in choices:
@@ -104,9 +92,6 @@ def one_hot_encoding(value, choices):
     return encoding
 
 
-# =========================================================
-# 4. 分子图特征
-# =========================================================
 class MoleculeFeaturizer(object):
     def __init__(self, bond_features=True):
         self.bond_features = bond_features
@@ -137,7 +122,7 @@ class MoleculeFeaturizer(object):
 
         aromatic_features = [int(atom.GetIsAromatic())]
 
-        # ===== 新增原子特征 =====
+
         formal_charge_choices = [-2, -1, 0, 1, 2]
         formal_charge_features = self._safe_one_hot(atom.GetFormalCharge(), formal_charge_choices)
 
@@ -180,7 +165,7 @@ class MoleculeFeaturizer(object):
             int(bond.IsInRing())
         ]
 
-        # ===== 新增键特征 =====
+
         stereo_choices = [
             Chem.rdchem.BondStereo.STEREONONE,
             Chem.rdchem.BondStereo.STEREOANY,
@@ -212,7 +197,7 @@ class MoleculeFeaturizer(object):
             dtype=torch.long
         )
 
-        # 4(bond type) + 2(conj/ring) + 6(stereo) + 4(direction) = 16
+
         edge_feature_dim = 16
 
         bond_features = []
@@ -230,9 +215,6 @@ class MoleculeFeaturizer(object):
         return x, edge_index, edge_attr
 
 
-# =========================================================
-# 5. 数据集
-# =========================================================
 class GraphDataset(Dataset):
     def __init__(self, df, smiles_col, label_cols, featurizer=None):
         self.df = df.reset_index(drop=True)
@@ -254,7 +236,7 @@ class GraphDataset(Dataset):
 
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            raise ValueError(f"无效 SMILES: {smiles}")
+            raise ValueError(f"Invalid SMILES: {smiles}")
 
         x, edge_index, edge_attr = self.featurizer(mol)
 
@@ -268,9 +250,6 @@ class GraphDataset(Dataset):
         return data
 
 
-# =========================================================
-# 6. 模型：共享 backbone + 独立二分类头
-# =========================================================
 class GATv2MultiLabel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -306,17 +285,17 @@ class GATv2MultiLabel(nn.Module):
         self.relu = nn.LeakyReLU()
         self.dropout = nn.Dropout(self.config.gnn_dropout)
 
-        mlp_input_dim = hidden_dim_all * 2   # mean + max
+        mlp_input_dim = hidden_dim_all * 2
         mlp_hidden_dim = mlp_input_dim // 2
 
-        # 共享图级表示变换
+
         self.shared_mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, mlp_hidden_dim),
             nn.ReLU(),
             nn.Dropout(self.config.gnn_dropout)
         )
 
-        # 每标签一个独立二分类头
+
         self.classifier_heads = nn.ModuleList([
             nn.Linear(mlp_hidden_dim, 1) for _ in range(self.config.gnn_output_dim)
         ])
@@ -354,9 +333,6 @@ class GATv2MultiLabel(nn.Module):
         return logits
 
 
-# =========================================================
-# 7. 指标计算
-# =========================================================
 def binary_metrics_per_label(y_true, y_prob, threshold=0.5):
     y_pred = (y_prob >= threshold).astype(int)
 
@@ -430,9 +406,6 @@ def binary_metrics_per_label(y_true, y_prob, threshold=0.5):
     return summary, per_label
 
 
-# =========================================================
-# 8. 训练与验证
-# =========================================================
 def train_one_epoch(model, loader, optimizer, criterion, device, epoch=None, total_epochs=None):
     model.train()
     running_loss = 0.0
@@ -511,24 +484,21 @@ def evaluate(model, loader, criterion, device, threshold=0.5, desc="Evaluating")
     return epoch_loss, summary, per_label
 
 
-# =========================================================
-# 9. 主程序
-# =========================================================
 def main():
     cfg = Config()
     os.makedirs(cfg.save_dir, exist_ok=True)
 
-    # 1. 先创建 logger 和设随机种子
-    logger = get_logger(os.path.join(cfg.save_dir, "train.log"))
+
+    logger = get_logger("train")
     seed_everything(cfg.seed)
     logger.info(f"Using device: {cfg.device}")
 
-    # 2. 读取数据
+
     train_df = pd.read_csv(cfg.train_csv)
     valid_df = pd.read_csv(cfg.valid_csv)
     test_df = pd.read_csv(cfg.test_csv)
 
-    # 3. 提取标签列
+
     label_cols = [c for c in train_df.columns if c != cfg.smiles_col]
     cfg.gnn_output_dim = len(label_cols)
 
@@ -538,13 +508,13 @@ def main():
     logger.info(f"Num labels: {len(label_cols)}")
     logger.info(f"Label cols: {label_cols}")
 
-    # 4. 先构建 featurizer，并自动检测原子/边特征维度
+
     featurizer = MoleculeFeaturizer()
 
     sample_smiles = train_df.iloc[0][cfg.smiles_col]
     sample_mol = Chem.MolFromSmiles(sample_smiles)
     if sample_mol is None:
-        raise ValueError(f"训练集第一条 SMILES 无效: {sample_smiles}")
+        raise ValueError(f"Invalid first training SMILES: {sample_smiles}")
 
     sample_x, sample_edge_index, sample_edge_attr = featurizer(sample_mol)
 
@@ -554,12 +524,12 @@ def main():
     logger.info(f"Auto-detected atom feature dim: {cfg.gnn_input_dim}")
     logger.info(f"Auto-detected edge feature dim: {edge_dim_detected}")
 
-    # 5. 构建数据集
+
     train_dataset = GraphDataset(train_df, cfg.smiles_col, label_cols, featurizer)
     valid_dataset = GraphDataset(valid_df, cfg.smiles_col, label_cols, featurizer)
     test_dataset = GraphDataset(test_df, cfg.smiles_col, label_cols, featurizer)
 
-    # 6. 构建 DataLoader
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.batch_size,
@@ -579,7 +549,7 @@ def main():
         num_workers=cfg.num_workers
     )
 
-    # 7. 构建模型
+
     model = GATv2MultiLabel(cfg).to(cfg.device)
 
     optimizer = torch.optim.Adam(
@@ -588,7 +558,7 @@ def main():
         weight_decay=cfg.weight_decay
     )
 
-    # 多标签任务：每个标签一个二分类，统一用 BCEWithLogitsLoss
+
     criterion = nn.BCEWithLogitsLoss()
 
     logger.info(model)
@@ -597,7 +567,7 @@ def main():
     logger.info("Architecture: shared backbone + independent binary heads")
     logger.info("Feature setting: enhanced atom features + enhanced bond features")
 
-    # 8. 训练
+
     best_valid_auc = -np.inf
     best_epoch = -1
     wait = 0
@@ -669,7 +639,7 @@ def main():
 
     logger.info(f"Best epoch: {best_epoch}, Best valid AUC: {best_valid_auc:.4f}")
 
-    # 9. 加载最佳模型并测试
+
     ckpt = torch.load(
         os.path.join(cfg.save_dir, cfg.model_name),
         map_location=cfg.device,
@@ -699,7 +669,7 @@ def main():
         f"ExactAcc={test_summary['exact_match_acc']:.4f}"
     )
 
-    # 10. 保存每标签结果
+
     per_label_df = pd.DataFrame(test_per_label)
     per_label_df["label_name"] = label_cols
     per_label_df.to_csv(
@@ -707,7 +677,7 @@ def main():
         index=False,
         encoding="utf-8-sig"
     )
-    logger.info("已保存每标签测试指标: test_per_label_metrics.csv")
+    logger.info("Saved per-label test metrics: test_per_label_metrics.csv")
 
 
 if __name__ == "__main__":

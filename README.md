@@ -25,3 +25,5 @@ Generated outputs are written to `results/`, which is intentionally excluded fro
 Processed data and split files are also generated locally and are intentionally excluded from version control.
 
 `gnn.py` is the full GNN training script. `gnnnpy.py` is kept as the companion GNN prediction/export script from the original workflow.
+
+For any questions regarding code reproduction or implementation, please contact us at nemozjc@163.com
