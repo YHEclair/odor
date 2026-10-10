@@ -8,3 +8,5 @@ torch
 torch-geometric
 tqdm
 iterative-stratification
+matplotlib
+pillow

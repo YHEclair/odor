@@ -6,10 +6,10 @@ Download the OpenPOM dataset from its original source and place it at:
 data/OpenPOM.csv
 ```
 
-Then run:
+Then run from this folder:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python prepare_openpom_labels.py
 python split_dataset.py
 python train_descriptor_xgb.py
@@ -21,9 +21,30 @@ python optimize_label_thresholds.py
 python compare_model_ensembles.py
 ```
 
-Generated outputs are written to `results/`, which is intentionally excluded from the release files.
-Processed data and split files are also generated locally and are intentionally excluded from version control.
+Generated models and results are written to `results/`. The source data, processed splits, trained models, and generated results are not included in this upload folder. Exact reproduction of the reported values also requires the study's original data version and split files.
 
-`gnn.py` is the full GNN training script. `gnnnpy.py` is kept as the companion GNN prediction/export script from the original workflow.
+## Interpretation
 
-For any questions regarding code reproduction or implementation, please contact us at nemozjc@163.com
+After training, run:
+
+```bash
+python analysis_dataset.py
+python descriptor_shap.py
+python fingerprint_shap.py
+python map_fingerprint_bits_to_substructures.py
+python plot_gnn2.py
+```
+
+These scripts generate dataset summaries, descriptor and fingerprint contributions, substructure examples, and atom-level attributions. The corresponding figure scripts are included as `plot_fig*.py`. Their outputs are saved under `results/`.
+
+## Predict New Molecules
+
+The example input is `examples/new_molecules.csv`. It requires a `SMILES` column; `compound_name` is optional. After training the three branches and saving the label-specific thresholds, run:
+
+```bash
+python predict_new_molecules.py --input examples/new_molecules.csv --output results/example_predictions.csv
+```
+
+The output includes predicted labels and per-label probabilities for the original 18 odor categories. A different label set requires new training and evaluation. Fine-tuning is not provided.
+
+For questions about code reproduction or implementation, please contact nemozjc@163.com.
