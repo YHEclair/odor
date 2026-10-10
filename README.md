@@ -32,10 +32,9 @@ python analysis_dataset.py
 python descriptor_shap.py
 python fingerprint_shap.py
 python map_fingerprint_bits_to_substructures.py
-python plot_gnn2.py
 ```
 
-These scripts generate dataset summaries, descriptor and fingerprint contributions, substructure examples, and atom-level attributions. The corresponding figure scripts are included as `plot_fig*.py`. Their outputs are saved under `results/`.
+These scripts generate dataset summaries, descriptor and fingerprint contributions, and fingerprint-bit-to-substructure mappings. Their outputs are saved under `results/`.
 
 ## Predict New Molecules
 
